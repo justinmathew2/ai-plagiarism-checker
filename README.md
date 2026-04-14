@@ -18,7 +18,7 @@ An AI-powered academic assistant that detects plagiarism, identifies AI-generate
 
 * Frontend: React (Google Stitch)
 * Backend: FastAPI (Antigravity)
-* AI: OpenAI APIs
+* AI: Google Gemini 1.5 Flash (via Vertex AI)
 
 ---
 
@@ -49,7 +49,7 @@ It is not a replacement for professional tools like Turnitin.
 
 ## 🌍 Live Demo
 
-(Will be added after deployment)
+🚀 **Live Link**: [https://justinsight-frontend-927623157898.us-central1.run.app/](https://justinsight-frontend-927623157898.us-central1.run.app/)
 
 ---
 

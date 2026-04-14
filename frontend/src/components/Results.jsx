@@ -1,0 +1,283 @@
+import React, { useState } from 'react';
+
+function Results({ results, setResults }) {
+  const [currentText, setCurrentText] = useState(results.text || '');
+  const [appliedIndices, setAppliedIndices] = useState(new Set());
+  
+  const plagiarismOffset = 364.4 - (364.4 * results.plagiarism_score) / 100;
+  const aiOffset = 364.4 - (364.4 * results.ai_score) / 100;
+
+  const handleApplySuggestion = (index, suggestion) => {
+    if (!suggestion.rewrite) return;
+    
+    // Normalize and escape for regex
+    const safeSearchText = suggestion.text.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+    
+    // Use Case-Insensitive Global match to align with renderHighlightedText
+    const regex = new RegExp(safeSearchText, 'gi');
+    
+    // Perform replacement on currentText state
+    const newText = currentText.replace(regex, suggestion.rewrite);
+    
+    if (newText !== currentText) {
+      setCurrentText(newText);
+      setAppliedIndices(prev => new Set(prev).add(index));
+    } else {
+      // Loose match attempt (ignoring extra spaces/newlines AND any character anomalies like '')
+      // We replace non-alphanumeric blocks with wildcards to reach the match
+      const looseSafe = safeSearchText
+        .split(/[^\w\s/]+/) // Split by non-word characters
+        .map(part => part.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&'))
+        .filter(p => p.length > 0)
+        .join('.{0,5}'); // Allow up to 5 bridge chars between segments
+      
+      const looseRegex = new RegExp(looseSafe, 'gi');
+      const fixedText = currentText.replace(looseRegex, suggestion.rewrite);
+      
+      if (fixedText !== currentText) {
+        setCurrentText(fixedText);
+        setAppliedIndices(prev => new Set(prev).add(index));
+      } else {
+        alert("Verification Error: Could not locate the exact text segment. Gemini identified: \"" + suggestion.text.substring(0, 30) + "...\"");
+      }
+    }
+  };
+
+  const handleDownload = () => {
+    const element = document.createElement("a");
+    const fileData = new Blob([currentText], {type: 'text/plain'});
+    element.href = URL.createObjectURL(fileData);
+    element.download = `verified_${results.filename || 'manuscript'}.txt`;
+    document.body.appendChild(element);
+    element.click();
+    document.body.removeChild(element);
+  };
+
+  const renderHighlightedText = () => {
+    if (!currentText) return <p>No text extracted from document.</p>;
+    
+    let highlightedText = currentText;
+    
+      // Only highlight non-applied suggestions
+      results.suggestions.forEach((suggestion, idx) => {
+        if (appliedIndices.has(idx)) return;
+        
+        const isPlagiarism = suggestion.type === 'plagiarism';
+        const spanClass = isPlagiarism 
+          ? "bg-error-container/30 border-b-2 border-error cursor-pointer mx-1" 
+          : "bg-[#fde68a]/40 border-b-2 border-[#D97706] cursor-pointer mx-1";
+        const title = isPlagiarism ? `Plagiarism: ${suggestion.details || 'Flagged'}` : `AI Pattern: ${suggestion.details || 'Flagged'}`;
+        
+        // Escape regex characters
+        const safeText = suggestion.text.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+        const regex = new RegExp(`(${safeText})`, 'gi');
+        highlightedText = highlightedText.replace(regex, `<span class="${spanClass}" title="${title}">$1</span>`);
+      });
+    
+    return highlightedText.split('\n').map((paragraph, idx) => (
+      paragraph.trim() ? <p key={idx} className="mb-6" dangerouslySetInnerHTML={{ __html: paragraph }} /> : null
+    ));
+  };
+
+  return (
+    <div className="flex flex-col gap-8 w-full">
+      <div className="flex items-center gap-4">
+        <button 
+          onClick={() => setResults(null)} 
+          className="text-primary hover:bg-surface-container-lowest p-2 rounded-full transition-colors flex items-center justify-center"
+        >
+          <span className="material-symbols-outlined">arrow_back</span>
+        </button>
+        <h1 className="text-2xl font-headline font-extrabold flex-grow">Analysis Results</h1>
+        {appliedIndices.size > 0 && (
+          <button 
+            onClick={handleDownload}
+            className="signature-gradient text-on-primary px-6 py-2 rounded-lg font-bold flex items-center gap-2 shadow-md animate-fade-in"
+          >
+            <span className="material-symbols-outlined text-sm">download</span>
+            Download Verified Manuscript
+          </button>
+        )}
+      </div>
+
+      <div className="bg-surface-variant/50 text-on-surface px-6 py-4 rounded border border-outline-variant/30 flex items-start gap-4">
+        <span className="material-symbols-outlined text-primary mt-0.5">info</span>
+        <div>
+          <p className="font-label font-bold text-sm">AI-Generated Analysis</p>
+          <p className="text-sm font-body text-on-surface-variant mt-1">The insights, scores, and rewriting suggestions presented below are generated by an Artificial Intelligence model (Google Gemini). Please use them with caution and exercise human judgment before finalizing your manuscript.</p>
+        </div>
+      </div>
+
+      {/* Hero Section: Scores & Stats */}
+      <section className="grid grid-cols-1 md:grid-cols-12 gap-6 items-center">
+        {/* Gauges */}
+        <div className="md:col-span-5 bg-surface-container-low rounded-xl p-8 flex justify-around items-center artifact-shadow">
+          <div className="flex flex-col items-center gap-4">
+            <div className="relative w-32 h-32">
+              <svg className="w-full h-full">
+                <circle className="text-surface-container-highest" cx="64" cy="64" fill="transparent" r="58" stroke="currentColor" strokeWidth="8"></circle>
+                <circle 
+                  className="text-error progress-ring__circle" 
+                  cx="64" cy="64" 
+                  fill="transparent" 
+                  r="58" 
+                  stroke="currentColor" 
+                  strokeDasharray="364.4" 
+                  strokeDashoffset={plagiarismOffset} 
+                  strokeLinecap="round" 
+                  strokeWidth="8">
+                </circle>
+              </svg>
+              <div className="absolute inset-0 flex flex-col items-center justify-center">
+                <span className="font-headline font-extrabold text-3xl text-on-surface">{results.plagiarism_score}%</span>
+                <span className="text-[10px] uppercase tracking-widest font-bold text-on-surface-variant">Plagiarism</span>
+              </div>
+            </div>
+          </div>
+          <div className="w-px h-16 bg-outline-variant/20"></div>
+          <div className="flex flex-col items-center gap-4">
+            <div className="relative w-32 h-32">
+              <svg className="w-full h-full">
+                <circle className="text-surface-container-highest" cx="64" cy="64" fill="transparent" r="58" stroke="currentColor" strokeWidth="8"></circle>
+                <circle 
+                  className="text-[#D97706] progress-ring__circle" 
+                  cx="64" cy="64" 
+                  fill="transparent" 
+                  r="58" 
+                  stroke="currentColor" 
+                  strokeDasharray="364.4" 
+                  strokeDashoffset={aiOffset} 
+                  strokeLinecap="round" 
+                  strokeWidth="8">
+                </circle>
+              </svg>
+              <div className="absolute inset-0 flex flex-col items-center justify-center">
+                <span className="font-headline font-extrabold text-3xl text-on-surface">{results.ai_score}%</span>
+                <span className="text-[10px] uppercase tracking-widest font-bold text-on-surface-variant">AI Content</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Stats Overview Bento */}
+        <div className="md:col-span-7 grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="bg-surface-container-low p-6 rounded-xl border-l-4 border-primary">
+            <span className="text-xs font-bold text-on-surface-variant uppercase tracking-tighter">Word Count</span>
+            <p className="text-2xl font-headline font-bold text-on-surface mt-1">
+              {results.text ? results.text.split(/\s+/).filter(word => word.length > 0).length : 0}
+            </p>
+          </div>
+          <div className="bg-surface-container-low p-6 rounded-xl border-l-4 border-primary">
+            <span className="text-xs font-bold text-on-surface-variant uppercase tracking-tighter">Issues Found</span>
+            <p className="text-2xl font-headline font-bold text-on-surface mt-1">
+              {results.suggestions?.length || 0}
+            </p>
+          </div>
+          <div className="bg-surface-container-low p-6 rounded-xl border-l-4 border-primary">
+            <span className="text-xs font-bold text-on-surface-variant uppercase tracking-tighter">Plagiarism Hits</span>
+            <p className="text-2xl font-headline font-bold text-on-surface mt-1">
+              {results.suggestions?.filter(s => s.type === 'plagiarism').length || 0}
+            </p>
+          </div>
+          <div className="bg-surface-container-low p-6 rounded-xl border-l-4 border-primary">
+            <span className="text-xs font-bold text-on-surface-variant uppercase tracking-tighter">AI Flags</span>
+            <p className="text-2xl font-headline font-bold text-on-surface mt-1">
+              {results.suggestions?.filter(s => s.type === 'ai').length || 0}
+            </p>
+          </div>
+        </div>
+      </section>
+
+      {/* Main Content: Split Screen Document Viewer & Sidebar */}
+      <section className="grid grid-cols-1 lg:grid-cols-12 gap-12 min-h-[800px]">
+        {/* Center: Document Viewer */}
+        <div className="lg:col-span-8 flex flex-col">
+          <div className="bg-surface-container-low px-12 py-8 rounded-t-xl border-b border-outline-variant/10">
+            <h1 className="font-body text-3xl font-semibold text-on-surface">{results.filename || 'Pasted Document'}</h1>
+            <div className="flex gap-4 mt-4">
+              <span className="bg-surface-variant text-on-surface-variant px-3 py-1 rounded-full text-xs font-medium">Parsed Content</span>
+              <span className="bg-surface-variant text-on-surface-variant px-3 py-1 rounded-full text-xs font-medium">Submission ID: #{results.id || 'TMP'}</span>
+            </div>
+          </div>
+          <div className="bg-surface-container-lowest p-12 rounded-b-xl artifact-shadow flex-grow">
+            <article className="font-body text-lg leading-[1.8] text-on-surface max-w-3xl mx-auto whitespace-pre-wrap break-words">
+              {renderHighlightedText()}
+            </article>
+          </div>
+        </div>
+
+        {/* Right: Rewrite Suggestions Panel */}
+        <div className="lg:col-span-4 flex flex-col gap-6">
+          <div className="flex justify-between items-center px-2">
+            <h2 className="font-headline font-bold text-xl text-on-surface">Interventions</h2>
+            <span className="text-xs bg-primary-container text-on-primary-container px-2 py-1 rounded font-bold uppercase">{results.suggestions?.length || 0} Issues Found</span>
+          </div>
+          
+          <div className="flex flex-col gap-4 overflow-y-auto max-h-[900px] pr-2">
+            {results.suggestions?.map((suggestion, index) => (
+              suggestion.type === 'plagiarism' ? (
+                <div key={index} className="bg-surface-container-lowest p-6 rounded-xl artifact-shadow border-l-4 border-error">
+                  <div className="flex justify-between items-start mb-4">
+                    <div className="flex items-center gap-2">
+                       <span className="material-symbols-outlined text-error text-xl">content_copy</span>
+                       <span className="font-bold text-sm text-error uppercase">Plagiarism Detected</span>
+                    </div>
+                  </div>
+                  <p className="text-sm font-medium text-on-surface mb-3 italic">"...{suggestion.text}..."</p>
+                  <p className="text-xs text-on-surface-variant mb-4">{suggestion.details}</p>
+                  
+                  {suggestion.rewrite && (
+                    <div className="bg-surface-container-low p-4 rounded-lg mb-4">
+                      <span className="text-[10px] uppercase font-bold text-on-primary-container block mb-1">Suggested Rewrite</span>
+                      <p className="text-sm text-on-surface">"{suggestion.rewrite}"</p>
+                    </div>
+                  )}
+                  <button 
+                    onClick={() => handleApplySuggestion(index, suggestion)}
+                    disabled={appliedIndices.has(index)}
+                    className={`w-full py-2 rounded-md font-bold text-sm shadow-sm transition-all
+                      ${appliedIndices.has(index) 
+                        ? 'bg-surface-container text-on-surface-variant cursor-not-allowed opacity-50' 
+                        : 'signature-gradient text-on-primary hover:opacity-90'}`}
+                  >
+                    {appliedIndices.has(index) ? 'Suggestion Applied' : 'Apply Suggestion'}
+                  </button>
+                </div>
+              ) : (
+                <div key={index} className="bg-surface-container-lowest p-6 rounded-xl artifact-shadow border-l-4 border-[#D97706]">
+                  <div className="flex justify-between items-start mb-4">
+                    <div className="flex items-center gap-2">
+                      <span className="material-symbols-outlined text-[#D97706] text-xl">smart_toy</span>
+                      <span className="font-bold text-sm text-[#D97706] uppercase">AI Content Pattern</span>
+                    </div>
+                  </div>
+                  <p className="text-sm font-medium text-on-surface mb-3 italic">"{suggestion.text}"</p>
+                  <p className="text-xs text-on-surface-variant mb-4">{suggestion.details}</p>
+                  
+                  {suggestion.rewrite && (
+                    <div className="bg-surface-container-low p-4 rounded-lg mb-4">
+                      <span className="text-[10px] uppercase font-bold text-on-primary-container block mb-1">Suggested Rewrite</span>
+                      <p className="text-sm text-on-surface">"{suggestion.rewrite}"</p>
+                    </div>
+                  )}
+                  <button 
+                    onClick={() => handleApplySuggestion(index, suggestion)}
+                    disabled={appliedIndices.has(index)}
+                    className={`w-full py-2 rounded-md font-bold text-sm shadow-sm transition-all
+                      ${appliedIndices.has(index) 
+                        ? 'bg-surface-container text-on-surface-variant cursor-not-allowed opacity-50' 
+                        : 'bg-secondary-container text-on-secondary-container hover:bg-secondary-fixed-dim'}`}
+                  >
+                    {appliedIndices.has(index) ? 'Applied' : 'Apply Rewrite'}
+                  </button>
+                </div>
+              )
+            ))}
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+export default Results;
